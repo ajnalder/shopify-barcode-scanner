@@ -14,9 +14,10 @@
             position: relative;
             width: 100%;
             height: 300px;
-            border: 2px solid #333;
-            margin-bottom: 20px;
             overflow: hidden;
+            margin-bottom: 20px;
+            background-color: #000;
+            border-radius: 8px;
         }
         #reader {
             width: 100%;
@@ -27,6 +28,7 @@
         }
         .card {
             margin-bottom: 15px;
+            border-radius: 8px;
         }
         .progress-container {
             position: fixed;
@@ -56,12 +58,13 @@
             transform: translateX(-50%);
             background-color: rgba(0,0,0,0.7);
             color: white;
-            padding: 5px 10px;
-            border-radius: 10px;
+            padding: 8px 15px;
+            border-radius: 20px;
             font-size: 14px;
             z-index: 100;
             text-align: center;
-            width: 80%;
+            width: auto;
+            min-width: 200px;
         }
         .scan-guide {
             position: absolute;
@@ -70,30 +73,42 @@
             transform: translate(-50%, -50%);
             width: 80%;
             height: 100px;
-            border: 2px solid white;
-            border-radius: 10px;
+            border: 2px solid rgba(33, 150, 243, 0.8);
+            border-radius: 8px;
             z-index: 99;
-            box-shadow: 0 0 0 2000px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 0 0 3000px rgba(0, 0, 0, 0.2);
         }
-        .scan-guide::before, .scan-guide::after {
-            content: '';
-            position: absolute;
-            width: 30px;
-            height: 30px;
-            border-color: #2196F3;
-            border-style: solid;
+        /* Remove custom scanning elements from the library */
+        #reader__scan_region img {
+            display: none !important;
         }
-        .scan-guide::before {
-            top: -2px;
-            left: -2px;
-            border-width: 2px 0 0 2px;
-            border-radius: 5px 0 0 0;
+        .scan-btn {
+            border-radius: 6px;
+            margin-right: 10px;
+            margin-bottom: 10px;
         }
-        .scan-guide::after {
-            bottom: -2px;
-            right: -2px;
-            border-width: 0 2px 2px 0;
-            border-radius: 0 0 5px 0;
+        /* Remove unwanted HTML5-QRCode elements */
+        #reader__camera_selection {
+            width: 100% !important;
+            max-width: 100% !important;
+            border-radius: 4px !important;
+            padding: 6px !important;
+            margin-bottom: 10px !important;
+        }
+        #reader__dashboard {
+            margin-top: 10px !important;
+        }
+        #reader__dashboard_section {
+            padding: 10px !important;
+        }
+        #reader__dashboard_section_csr button {
+            background-color: #0d6efd !important;
+            color: white !important;
+            border-color: #0d6efd !important;
+        }
+        /* Remove all the library's status span elements */
+        #reader__status_span {
+            display: none !important;
         }
     </style>
 </head>
@@ -162,7 +177,7 @@
                 <div class="card-body">
                     <div class="input-group mb-3">
                         <input type="text" id="sku-search" class="form-control" placeholder="Enter Variant SKU">
-                        <button id="search-btn" class="btn btn-outline-secondary">Search</button>
+                        <button id="search-btn" class="btn btn-primary">Search</button>
                     </div>
                     <div id="stats-container" class="mb-3">
                         <div class="d-flex justify-content-between flex-wrap">
@@ -175,7 +190,7 @@
             </div>
             
             <div id="product-details" class="card hidden">
-                <div class="card-header">
+                <div class="card-header bg-light">
                     <h5 class="card-title mb-0" id="product-title">Product Details</h5>
                 </div>
                 <div class="card-body">
@@ -194,18 +209,21 @@
                     <h5 class="card-title mb-0">Step 3: Scan Barcode</h5>
                 </div>
                 <div class="card-body">
-                    <div class="scan-area mb-3">
-                        <div id="reader"></div>
-                        <div class="scan-guide"></div>
-                        <div id="scanner-status" class="scanner-status">Scanner active - Point at barcode</div>
+                    <div id="reader-wrapper" class="mb-3">
+                        <!-- We'll create a custom scanner UI instead of using the library's UI -->
+                        <div id="scanner-container" class="scan-area">
+                            <video id="scanner-video" style="width: 100%; height: 100%; object-fit: cover;"></video>
+                            <div id="scan-guide-box" class="scan-guide"></div>
+                            <div id="scanner-status" class="scanner-status">Starting camera...</div>
+                        </div>
                     </div>
                     <div class="input-group mb-3">
                         <input type="text" id="barcode-result" class="form-control" placeholder="Barcode will appear here">
                         <button id="save-barcode" class="btn btn-success">Save Barcode</button>
                     </div>
                     <div class="d-flex flex-wrap">
-                        <button id="restart-scanner" class="btn btn-outline-secondary me-2 mb-2">Restart Scanner</button>
-                        <button id="toggle-flash" class="btn btn-outline-primary mb-2">Toggle Flashlight</button>
+                        <button id="restart-scanner" class="btn btn-outline-secondary scan-btn">Restart Scanner</button>
+                        <button id="toggle-camera" class="btn btn-outline-primary scan-btn">Switch Camera</button>
                     </div>
                 </div>
             </div>
@@ -226,17 +244,19 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
     <script>
         // Variables to store data
         let productData = [];
         let currentProduct = null;
-        let html5QrCode;
+        let quaggaScanner = null;
         let originalFileName = '';
         let isScanning = false;
         let lastScannedCode = "";
         let lastScannedTime = 0;
+        let currentStream = null;
+        let currentCamera = 'environment';
 
         // Column mapping
         let skuColumn = 'Variant SKU';
@@ -269,8 +289,9 @@
         const withBarcodeCount = document.getElementById('with-barcode-count');
         const withoutBarcodeCount = document.getElementById('without-barcode-count');
         const restartScannerBtn = document.getElementById('restart-scanner');
-        const toggleFlashBtn = document.getElementById('toggle-flash');
+        const toggleCameraBtn = document.getElementById('toggle-camera');
         const scannerStatus = document.getElementById('scanner-status');
+        const scannerVideo = document.getElementById('scanner-video');
         const skuColumnInput = document.getElementById('sku-column');
         const barcodeColumnInput = document.getElementById('barcode-column');
         const titleColumnInput = document.getElementById('title-column');
@@ -472,19 +493,24 @@
         
         function stopScanner() {
             return new Promise((resolve) => {
-                if (html5QrCode && isScanning) {
-                    html5QrCode.stop().then(() => {
-                        isScanning = false;
-                        addDebugMessage('Scanner stopped');
-                        resolve();
-                    }).catch(err => {
-                        isScanning = false;
-                        addDebugMessage('Error stopping scanner: ' + err);
-                        resolve();
-                    });
-                } else {
-                    resolve();
+                if (isScanning) {
+                    if (Quagga.initialized) {
+                        Quagga.stop();
+                        addDebugMessage('Quagga scanner stopped');
+                    }
+                    
+                    // Stop camera stream if it exists
+                    if (currentStream) {
+                        currentStream.getTracks().forEach(track => {
+                            track.stop();
+                        });
+                        currentStream = null;
+                        addDebugMessage('Camera stream stopped');
+                    }
+                    
+                    isScanning = false;
                 }
+                resolve();
             });
         }
         
@@ -541,108 +567,128 @@
             });
         });
         
-        // Toggle flash/torch
-        toggleFlashBtn.addEventListener('click', function() {
-            if (html5QrCode && isScanning) {
-                html5QrCode.getState().then((state) => {
-                    // Toggle torch based on current state
-                    const currentTorch = state.torch || false;
-                    html5QrCode.applyVideoConstraints({
-                        advanced: [{torch: !currentTorch}]
-                    }).then(() => {
-                        addDebugMessage('Torch toggled to ' + (!currentTorch ? 'ON' : 'OFF'));
-                    }).catch(err => {
-                        addDebugMessage('Failed to toggle torch: ' + err);
-                        alert('Torch control not supported on this device');
-                    });
-                });
-            }
+        // Toggle camera
+        toggleCameraBtn.addEventListener('click', function() {
+            // Switch between front and back camera
+            currentCamera = currentCamera === 'environment' ? 'user' : 'environment';
+            addDebugMessage('Switching camera to: ' + currentCamera);
+            
+            stopScanner().then(() => {
+                setTimeout(() => {
+                    initBarcodeScanner();
+                }, 500);
+            });
         });
 
         // Initialize barcode scanner
         function initBarcodeScanner() {
-            addDebugMessage('Initializing barcode scanner...');
-            scannerStatus.textContent = 'Starting scanner...';
+            addDebugMessage('Initializing Quagga barcode scanner...');
+            scannerStatus.textContent = 'Starting camera...';
             
-            // Create scanner instance if it doesn't exist
-            if (!html5QrCode) {
-                html5QrCode = new Html5Qrcode("reader", { formatsToSupport: [ 
-                    Html5QrcodeSupportedFormats.EAN_13,
-                    Html5QrcodeSupportedFormats.EAN_8,
-                    Html5QrcodeSupportedFormats.CODE_39,
-                    Html5QrcodeSupportedFormats.CODE_93,
-                    Html5QrcodeSupportedFormats.CODE_128,
-                    Html5QrcodeSupportedFormats.UPC_A,
-                    Html5QrcodeSupportedFormats.UPC_E
-                ]});
-            }
-            
-            startScanner();
+            // First request camera access
+            navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: { ideal: currentCamera },
+                    width: { min: 640, ideal: 1280, max: 1920 },
+                    height: { min: 480, ideal: 720, max: 1080 }
+                } 
+            }).then(stream => {
+                currentStream = stream;
+                scannerVideo.srcObject = stream;
+                scannerVideo.play();
+                
+                // Once we have camera access, start Quagga
+                startQuaggaScanner();
+            }).catch(err => {
+                addDebugMessage('Camera access error: ' + err);
+                scannerStatus.textContent = 'Camera error - Check permissions';
+                alert('Could not access camera: ' + err);
+            });
         }
         
-        function startScanner() {
-            if (isScanning) {
-                return;
-            }
-            
-            const config = { 
-                fps: 20, 
-                qrbox: { width: 250, height: 100 },
-                aspectRatio: 1.777778,
-                experimentalFeatures: {
-                    useBarCodeDetectorIfSupported: true
+        function startQuaggaScanner() {
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: scannerVideo,
+                    constraints: {
+                        width: 1280,
+                        height: 720,
+                        facingMode: currentCamera
+                    },
                 },
-                rememberLastUsedCamera: true
-            };
-
-            scannerStatus.textContent = 'Activating camera...';
-            
-            // Reset last scanned values
-            lastScannedCode = "";
-            lastScannedTime = 0;
-            
-            html5QrCode.start(
-                { facingMode: "environment" }, 
-                config, 
-                (decodedText, decodedResult) => {
-                    // Check for duplicate scans (debounce)
-                    const now = new Date().getTime();
-                    if (decodedText === lastScannedCode && now - lastScannedTime < 2000) {
-                        // Ignore duplicate scan within 2 seconds
-                        return;
+                locator: {
+                    patchSize: "medium",
+                    halfSample: true
+                },
+                numOfWorkers: 2,
+                decoder: {
+                    readers: [
+                        "ean_reader",
+                        "ean_8_reader",
+                        "code_39_reader",
+                        "code_128_reader",
+                        "upc_reader",
+                        "upc_e_reader"
+                    ],
+                    debug: {
+                        showCanvas: false,
+                        showPatches: false,
+                        showFoundPatches: false,
+                        showSkeleton: false,
+                        showLabels: false,
+                        showPatchLabels: false,
+                        showRemainingPatchLabels: false
                     }
-                    
-                    lastScannedCode = decodedText;
-                    lastScannedTime = now;
-                    
-                    // On successful scan
-                    scannerStatus.textContent = 'Barcode detected!';
-                    barcodeResult.value = decodedText;
-                    
-                    addDebugMessage('Barcode scanned: ' + decodedText + ' format: ' + decodedResult.result.format.formatName);
-                    
-                    // Play a beep sound to indicate successful scan
-                    const beep = new Audio("data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU" + Array(1e3).join("123"));
-                    beep.play().catch(e => console.log("Audio play failed:", e));
-                    
-                    // Stop scanner after successful scan
-                    stopScanner().then(() => {
-                        // Auto-focus save button
-                        saveBarcodeBtn.focus();
-                    });
                 },
-                (errorMessage) => {
-                    // Don't log continual scanning errors
+                locate: true
+            }, function(err) {
+                if (err) {
+                    addDebugMessage('Quagga initialization error: ' + err);
+                    scannerStatus.textContent = 'Scanner error - Try restart';
+                    return;
                 }
-            ).then(() => {
-                isScanning = true;
+                
+                addDebugMessage('Quagga initialized successfully');
                 scannerStatus.textContent = 'Scanner active - Point at barcode';
-                addDebugMessage('Scanner started successfully');
-            }).catch((err) => {
-                isScanning = false;
-                scannerStatus.textContent = 'Scanner error - Try restart';
-                addDebugMessage('Error starting scanner: ' + err);
-                alert("Could not start scanner: " + err);
+                isScanning = true;
+                
+                Quagga.start();
+                
+                // Reset scan tracking
+                lastScannedCode = "";
+                lastScannedTime = 0;
+            });
+            
+            // Handle successful scans
+            Quagga.onDetected(function(result) {
+                const code = result.codeResult.code;
+                
+                // Debounce to prevent multiple scans of the same code
+                const now = new Date().getTime();
+                if (code === lastScannedCode && now - lastScannedTime < 2000) {
+                    return;
+                }
+                
+                lastScannedCode = code;
+                lastScannedTime = now;
+                
+                // On successful scan
+                scannerStatus.textContent = 'Barcode detected!';
+                barcodeResult.value = code;
+                
+                addDebugMessage('Barcode scanned: ' + code + ' format: ' + result.codeResult.format);
+                
+                // Play a beep sound to indicate successful scan
+                const beep = new Audio("data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU" + Array(1e3).join("123"));
+                beep.play().catch(e => console.log("Audio play failed:", e));
+                
+                // Stop scanner after successful scan
+                stopScanner().then(() => {
+                    // Auto-focus save button
+                    saveBarcodeBtn.focus();
+                });
             });
         }
 
@@ -725,4 +771,3 @@
         }, { passive: false });
     </script>
 </body>
-</html>
