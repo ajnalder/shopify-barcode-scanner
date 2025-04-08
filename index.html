@@ -47,6 +47,17 @@
             overflow-y: auto;
             margin-bottom: 15px;
         }
+        .scanner-status {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0,0,0,0.5);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 10px;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -148,15 +159,14 @@
                 <div class="card-body">
                     <div class="scan-area mb-3">
                         <div id="reader"></div>
+                        <div id="scanner-status" class="scanner-status">Scanner active</div>
                     </div>
                     <div class="input-group mb-3">
                         <input type="text" id="barcode-result" class="form-control" placeholder="Barcode will appear here">
                         <button id="save-barcode" class="btn btn-success">Save Barcode</button>
                     </div>
-                    <div class="d-flex">
-                        <button id="start-scanning" class="btn btn-outline-primary me-2">Start Scanning</button>
-                        <button id="stop-scanning" class="btn btn-outline-danger">Stop Scanning</button>
-                    </div>
+                    <!-- Manual restart button in case of issues -->
+                    <button id="restart-scanner" class="btn btn-outline-secondary">Restart Scanner</button>
                 </div>
             </div>
         </div>
@@ -216,8 +226,8 @@
         const totalCount = document.getElementById('total-count');
         const withBarcodeCount = document.getElementById('with-barcode-count');
         const withoutBarcodeCount = document.getElementById('without-barcode-count');
-        const startScanningBtn = document.getElementById('start-scanning');
-        const stopScanningBtn = document.getElementById('stop-scanning');
+        const restartScannerBtn = document.getElementById('restart-scanner');
+        const scannerStatus = document.getElementById('scanner-status');
         const skuColumnInput = document.getElementById('sku-column');
         const barcodeColumnInput = document.getElementById('barcode-column');
         const titleColumnInput = document.getElementById('title-column');
@@ -411,6 +421,22 @@
                 return;
             }
 
+            // Stop any existing scanner first
+            if (html5QrCode && isScanning) {
+                html5QrCode.stop().then(() => {
+                    isScanning = false;
+                    findProductAndStartScanner(sku);
+                }).catch(err => {
+                    isScanning = false;
+                    addDebugMessage('Error stopping scanner: ' + err);
+                    findProductAndStartScanner(sku);
+                });
+            } else {
+                findProductAndStartScanner(sku);
+            }
+        }
+        
+        function findProductAndStartScanner(sku) {
             addDebugMessage('Searching for SKU: ' + sku);
 
             // Find product with matching SKU
@@ -444,7 +470,8 @@
                 productDetails.classList.remove('hidden');
                 scanSection.classList.remove('hidden');
                 
-                // Don't auto-start scanner, let user click the button
+                // Automatically start the scanner
+                initBarcodeScanner();
             } else {
                 addDebugMessage('Product not found for SKU: ' + sku);
                 alert('Product not found! Please check the SKU and try again.');
@@ -453,58 +480,67 @@
             }
         }
 
-        // Manual scanner control
-        startScanningBtn.addEventListener('click', function() {
-            if (!isScanning) {
-                initBarcodeScanner();
-            }
-        });
-        
-        stopScanningBtn.addEventListener('click', function() {
+        // Restart scanner manually if needed
+        restartScannerBtn.addEventListener('click', function() {
             if (isScanning && html5QrCode) {
                 html5QrCode.stop().then(() => {
                     isScanning = false;
-                    addDebugMessage('Scanner stopped manually');
+                    addDebugMessage('Scanner stopped manually for restart');
+                    setTimeout(() => {
+                        initBarcodeScanner();
+                    }, 500);
                 }).catch(err => {
+                    isScanning = false;
                     addDebugMessage('Error stopping scanner: ' + err);
+                    setTimeout(() => {
+                        initBarcodeScanner();
+                    }, 500);
                 });
+            } else {
+                initBarcodeScanner();
             }
         });
 
         // Initialize barcode scanner
         function initBarcodeScanner() {
             addDebugMessage('Initializing barcode scanner...');
+            scannerStatus.textContent = 'Starting scanner...';
             
-            if (html5QrCode && isScanning) {
-                html5QrCode.stop().then(() => {
-                    startNewScanner();
-                }).catch(err => {
-                    addDebugMessage('Error stopping scanner: ' + err);
-                    startNewScanner();
-                });
-            } else {
-                startNewScanner();
-            }
-        }
-        
-        function startNewScanner() {
-            addDebugMessage('Starting new scanner instance');
-            
+            // Create scanner instance if it doesn't exist
             if (!html5QrCode) {
                 html5QrCode = new Html5Qrcode("reader");
             }
             
+            // If already scanning, stop first
+            if (isScanning) {
+                html5QrCode.stop().then(() => {
+                    isScanning = false;
+                    startScanner();
+                }).catch(err => {
+                    isScanning = false;
+                    addDebugMessage('Error stopping existing scanner: ' + err);
+                    startScanner();
+                });
+            } else {
+                startScanner();
+            }
+        }
+        
+        function startScanner() {
             const config = { 
                 fps: 10, 
                 qrbox: { width: 250, height: 150 },
                 aspectRatio: 1.777778
             };
 
+            scannerStatus.textContent = 'Activating camera...';
+            
             html5QrCode.start(
                 { facingMode: "environment" }, 
                 config, 
                 (decodedText) => {
                     // On successful scan
+                    scannerStatus.textContent = 'Barcode detected!';
                     isScanning = false;
                     barcodeResult.value = decodedText;
                     
@@ -514,10 +550,10 @@
                     const beep = new Audio("data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU" + Array(1e3).join("123"));
                     beep.play().catch(e => console.log("Audio play failed:", e));
                     
-                    html5QrCode.stop();
-                    
-                    // Auto-focus save button
-                    saveBarcodeBtn.focus();
+                    html5QrCode.stop().then(() => {
+                        // Auto-focus save button
+                        saveBarcodeBtn.focus();
+                    });
                 },
                 (errorMessage) => {
                     // Handle error (but don't display them, they happen constantly during scanning)
@@ -525,9 +561,11 @@
                 }
             ).then(() => {
                 isScanning = true;
+                scannerStatus.textContent = 'Scanner active - Point at barcode';
                 addDebugMessage('Scanner started successfully');
             }).catch((err) => {
                 isScanning = false;
+                scannerStatus.textContent = 'Scanner error - Try restart';
                 addDebugMessage('Error starting scanner: ' + err);
                 alert("Could not start scanner: " + err);
             });
@@ -553,6 +591,15 @@
                 barcodeResult.value = '';
                 productDetails.classList.add('hidden');
                 scanSection.classList.add('hidden');
+                
+                // Stop scanner if still running
+                if (html5QrCode && isScanning) {
+                    html5QrCode.stop().then(() => {
+                        isScanning = false;
+                    }).catch(err => {
+                        isScanning = false;
+                    });
+                }
                 
                 // Focus back on SKU search for next product
                 skuSearchInput.focus();
