@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shopify Barcode Scanner</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-bottom: 50px;
+        }
+        .scan-area {
+            position: relative;
+            width: 100%;
+            height: 300px;
+            border: 2px solid #333;
+            margin-bottom: 20px;
+        }
+        #reader {
+            width: 100%;
+            height: 100%;
+        }
+        .hidden {
+            display: none;
+        }
+        .card {
+            margin-bottom: 15px;
+        }
+        .progress-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 1000;
+        }
+        .status-badge {
+            font-size: 0.8rem;
+            padding: 3px 8px;
+        }
+        #debug-info {
+            font-family: monospace;
+            font-size: 12px;
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="progress-container hidden" id="progress-container">
+        <div class="progress" style="height: 5px; border-radius: 0;">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" id="progress-bar" role="progressbar" style="width: 0%"></div>
+        </div>
+    </div>
+
+    <div class="container mt-4">
+        <h1>Shopify Barcode Scanner</h1>
+        <p class="lead">Update product barcodes in your Shopify CSV file</p>
+        
+        <!-- Debug Toggle -->
+        <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" id="debug-mode">
+            <label class="form-check-label" for="debug-mode">Show Debug Info</label>
+        </div>
+        
+        <!-- Debug Info Panel -->
+        <div id="debug-info" class="hidden"></div>
+        
+        <!-- Step 1: Upload CSV -->
+        <div id="upload-section" class="mb-4">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">Step 1: Upload your Shopify CSV</h5>
+                </div>
+                <div class="card-body">
+                    <input type="file" id="csv-file" class="form-control" accept=".csv">
+                    <div class="form-text mb-3">For large files, please be patient as parsing may take some time.</div>
+                    <div class="mt-2 d-flex">
+                        <button id="parse-csv" class="btn btn-primary me-2">Load Products</button>
+                        <div class="dropdown">
+                            <button class="btn btn-secondary dropdown-toggle" type="button" id="column-mapping-button" data-bs-toggle="dropdown" aria-expanded="false">
+                                Column Mapping
+                            </button>
+                            <div class="dropdown-menu p-3" style="width: 300px;">
+                                <div class="mb-2">
+                                    <label for="sku-column" class="form-label">SKU Column Name:</label>
+                                    <input type="text" class="form-control" id="sku-column" value="Variant SKU">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="barcode-column" class="form-label">Barcode Column Name:</label>
+                                    <input type="text" class="form-control" id="barcode-column" value="Variant Barcode">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="title-column" class="form-label">Title Column Name:</label>
+                                    <input type="text" class="form-control" id="title-column" value="Title">
+                                </div>
+                                <div class="form-text">Adjust these if your CSV uses different column names</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Search by SKU -->
+        <div id="search-section" class="mb-4 hidden">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">Step 2: Find product by SKU</h5>
+                </div>
+                <div class="card-body">
+                    <div class="input-group mb-3">
+                        <input type="text" id="sku-search" class="form-control" placeholder="Enter Variant SKU">
+                        <button id="search-btn" class="btn btn-outline-secondary">Search</button>
+                    </div>
+                    <div id="stats-container" class="mb-3">
+                        <div class="d-flex justify-content-between flex-wrap">
+                            <div><strong>Total Products:</strong> <span id="total-count">0</span></div>
+                            <div><strong>With Barcodes:</strong> <span id="with-barcode-count">0</span></div>
+                            <div><strong>Without Barcodes:</strong> <span id="without-barcode-count">0</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="product-details" class="card hidden">
+                <div class="card-header">
+                    <h5 class="card-title mb-0" id="product-title">Product Details</h5>
+                </div>
+                <div class="card-body">
+                    <p><strong>SKU:</strong> <span id="product-sku"></span></p>
+                    <p><strong>Current Barcode:</strong> <span id="existing-barcode"></span> 
+                        <span id="barcode-status" class="badge status-badge"></span>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Scan Barcode -->
+        <div id="scan-section" class="hidden">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">Step 3: Scan Barcode</h5>
+                </div>
+                <div class="card-body">
+                    <div class="scan-area mb-3">
+                        <div id="reader"></div>
+                    </div>
+                    <div class="input-group mb-3">
+                        <input type="text" id="barcode-result" class="form-control" placeholder="Barcode will appear here">
+                        <button id="save-barcode" class="btn btn-success">Save Barcode</button>
+                    </div>
+                    <div class="d-flex">
+                        <button id="start-scanning" class="btn btn-outline-primary me-2">Start Scanning</button>
+                        <button id="stop-scanning" class="btn btn-outline-danger">Stop Scanning</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 4: Download CSV -->
+        <div id="download-section" class="mt-4 hidden">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">Step 4: Download Updated CSV</h5>
+                </div>
+                <div class="card-body">
+                    <button id="download-csv" class="btn btn-primary">Download Updated CSV</button>
+                    <p class="mt-2">You can download the CSV at any time to save your progress.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode/html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
+    <script>
+        // Variables to store data
+        let productData = [];
+        let currentProduct = null;
+        let html5QrCode;
+        let originalFileName = '';
+        let isScanning = false;
+
+        // Column mapping
+        let skuColumn = 'Variant SKU';
+        let barcodeColumn = 'Variant Barcode';
+        let titleColumn = 'Title';
+
+        // DOM elements
+        const debugMode = document.getElementById('debug-mode');
+        const debugInfo = document.getElementById('debug-info');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const uploadSection = document.getElementById('upload-section');
+        const searchSection = document.getElementById('search-section');
+        const scanSection = document.getElementById('scan-section');
+        const downloadSection = document.getElementById('download-section');
+        const csvFileInput = document.getElementById('csv-file');
+        const parseCsvBtn = document.getElementById('parse-csv');
+        const skuSearchInput = document.getElementById('sku-search');
+        const searchBtn = document.getElementById('search-btn');
+        const productDetails = document.getElementById('product-details');
+        const productTitle = document.getElementById('product-title');
+        const productSku = document.getElementById('product-sku');
+        const existingBarcode = document.getElementById('existing-barcode');
+        const barcodeStatus = document.getElementById('barcode-status');
+        const barcodeResult = document.getElementById('barcode-result');
+        const saveBarcodeBtn = document.getElementById('save-barcode');
+        const downloadCsvBtn = document.getElementById('download-csv');
+        const statsContainer = document.getElementById('stats-container');
+        const totalCount = document.getElementById('total-count');
+        const withBarcodeCount = document.getElementById('with-barcode-count');
+        const withoutBarcodeCount = document.getElementById('without-barcode-count');
+        const startScanningBtn = document.getElementById('start-scanning');
+        const stopScanningBtn = document.getElementById('stop-scanning');
+        const skuColumnInput = document.getElementById('sku-column');
+        const barcodeColumnInput = document.getElementById('barcode-column');
+        const titleColumnInput = document.getElementById('title-column');
+
+        // Debug mode toggle
+        debugMode.addEventListener('change', function() {
+            if (this.checked) {
+                debugInfo.classList.remove('hidden');
+            } else {
+                debugInfo.classList.add('hidden');
+            }
+        });
+
+        // Helper function to add debug message
+        function addDebugMessage(message) {
+            const line = document.createElement('div');
+            line.textContent = new Date().toLocaleTimeString() + ': ' + message;
+            debugInfo.appendChild(line);
+            debugInfo.scrollTop = debugInfo.scrollHeight;
+        }
+
+        // Update column mapping on input change
+        skuColumnInput.addEventListener('change', function() {
+            skuColumn = this.value;
+            addDebugMessage('SKU column set to: ' + skuColumn);
+        });
+
+        barcodeColumnInput.addEventListener('change', function() {
+            barcodeColumn = this.value;
+            addDebugMessage('Barcode column set to: ' + barcodeColumn);
+        });
+
+        titleColumnInput.addEventListener('change', function() {
+            titleColumn = this.value;
+            addDebugMessage('Title column set to: ' + titleColumn);
+        });
+
+        // Parse CSV file
+        parseCsvBtn.addEventListener('click', () => {
+            const file = csvFileInput.files[0];
+            if (!file) {
+                alert('Please select a CSV file');
+                return;
+            }
+
+            addDebugMessage('Starting to parse file: ' + file.name);
+            originalFileName = file.name;
+            progressContainer.classList.remove('hidden');
+            productData = []; // Reset product data
+            
+            // First check the file content with a small preview to identify headers
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const sample = e.target.result.slice(0, 10000); // First 10KB for header detection
+                addDebugMessage('Sampling file to detect headers...');
+                
+                Papa.parse(sample, {
+                    header: true,
+                    preview: 5,
+                    complete: function(results) {
+                        if (results.errors.length > 0) {
+                            addDebugMessage('Warning: Errors in CSV sample: ' + JSON.stringify(results.errors));
+                        }
+                        
+                        if (results.meta && results.meta.fields) {
+                            addDebugMessage('Detected columns: ' + results.meta.fields.join(', '));
+                            
+                            // Check if our expected columns exist
+                            const hasSkuColumn = results.meta.fields.includes(skuColumn);
+                            const hasBarcodeColumn = results.meta.fields.includes(barcodeColumn);
+                            const hasTitleColumn = results.meta.fields.includes(titleColumn);
+                            
+                            if (!hasSkuColumn) {
+                                addDebugMessage('Warning: SKU column "' + skuColumn + '" not found');
+                                alert('Warning: SKU column "' + skuColumn + '" not found in CSV. Please check column mapping.');
+                            }
+                            
+                            if (!hasBarcodeColumn) {
+                                addDebugMessage('Warning: Barcode column "' + barcodeColumn + '" not found');
+                                alert('Warning: Barcode column "' + barcodeColumn + '" not found in CSV. Please check column mapping.');
+                            }
+                            
+                            if (!hasTitleColumn) {
+                                addDebugMessage('Warning: Title column "' + titleColumn + '" not found');
+                                // Not critical, just log it
+                            }
+                            
+                            // Now parse the full file
+                            parseCsvFile(file);
+                        } else {
+                            addDebugMessage('Error: Could not detect columns in CSV');
+                            alert('Error: Could not detect columns in CSV. Please check file format.');
+                            progressContainer.classList.add('hidden');
+                        }
+                    }
+                });
+            };
+            reader.readAsText(file);
+        });
+
+        function parseCsvFile(file) {
+            addDebugMessage('Parsing full file...');
+            
+            Papa.parse(file, {
+                header: true,
+                dynamicTyping: false, // Keep as strings to preserve leading zeros
+                skipEmptyLines: true,
+                step: function(results, parser) {
+                    // Update progress bar
+                    if (parser.totalLines) {
+                        const progress = Math.round((parser.lineNo / parser.totalLines) * 100);
+                        progressBar.style.width = progress + '%';
+                    }
+                    
+                    // Add the row to our data
+                    if (results.data && Object.keys(results.data).length > 0) {
+                        productData.push(results.data);
+                    }
+                },
+                complete: function(results) {
+                    addDebugMessage('Parsing complete. Rows processed: ' + productData.length);
+                    addDebugMessage('Parse errors: ' + results.errors.length);
+                    
+                    if (results.errors.length > 0) {
+                        addDebugMessage('First error: ' + JSON.stringify(results.errors[0]));
+                    }
+                    
+                    if (productData.length === 0) {
+                        addDebugMessage('ERROR: No products loaded!');
+                        addDebugMessage('Meta info: ' + JSON.stringify(results.meta));
+                        
+                        alert('No products loaded from CSV. Please check the debug information for details.');
+                        progressContainer.classList.add('hidden');
+                        return;
+                    }
+                    
+                    // Display sample of first product
+                    addDebugMessage('First product sample: ' + JSON.stringify(productData[0]));
+                    
+                    // Calculate statistics
+                    updateStatistics();
+                    
+                    // Show search section
+                    searchSection.classList.remove('hidden');
+                    downloadSection.classList.remove('hidden');
+                    progressContainer.classList.add('hidden');
+                    
+                    alert(`Successfully loaded ${productData.length} products!`);
+                    
+                    // Focus on search input
+                    skuSearchInput.focus();
+                },
+                error: function(error) {
+                    addDebugMessage('Error parsing CSV: ' + error.message);
+                    alert('Error parsing CSV: ' + error.message);
+                    progressContainer.classList.add('hidden');
+                }
+            });
+        }
+
+        function updateStatistics() {
+            const totalProducts = productData.length;
+            const withBarcode = productData.filter(p => 
+                p[barcodeColumn] && p[barcodeColumn].toString().trim() !== ''
+            ).length;
+            const withoutBarcode = totalProducts - withBarcode;
+            
+            totalCount.textContent = totalProducts;
+            withBarcodeCount.textContent = withBarcode;
+            withoutBarcodeCount.textContent = withoutBarcode;
+            
+            addDebugMessage(`Statistics updated: Total: ${totalProducts}, With barcode: ${withBarcode}, Without: ${withoutBarcode}`);
+        }
+
+        // Search for product by SKU
+        searchBtn.addEventListener('click', () => {
+            searchProduct();
+        });
+        
+        // Also search when pressing Enter in the search box
+        skuSearchInput.addEventListener('keyup', (e) => {
+            if (e.key === 'Enter') {
+                searchProduct();
+            }
+        });
+        
+        function searchProduct() {
+            const sku = skuSearchInput.value.trim();
+            if (!sku) {
+                alert('Please enter a SKU');
+                return;
+            }
+
+            addDebugMessage('Searching for SKU: ' + sku);
+
+            // Find product with matching SKU
+            currentProduct = productData.find(product => 
+                product[skuColumn] && 
+                product[skuColumn].toString().trim() === sku
+            );
+            
+            if (currentProduct) {
+                addDebugMessage('Product found: ' + JSON.stringify(currentProduct));
+                
+                // Display product details
+                productTitle.textContent = currentProduct[titleColumn] || 'Product';
+                productSku.textContent = currentProduct[skuColumn];
+                
+                const currentBarcode = currentProduct[barcodeColumn] || '';
+                existingBarcode.textContent = currentBarcode ? currentBarcode : 'None';
+                
+                // Set barcode status
+                if (currentBarcode) {
+                    barcodeStatus.textContent = 'PRESENT';
+                    barcodeStatus.className = 'badge status-badge bg-success';
+                } else {
+                    barcodeStatus.textContent = 'MISSING';
+                    barcodeStatus.className = 'badge status-badge bg-danger';
+                }
+                
+                // Pre-fill barcode result if exists
+                barcodeResult.value = currentBarcode;
+                
+                productDetails.classList.remove('hidden');
+                scanSection.classList.remove('hidden');
+                
+                // Don't auto-start scanner, let user click the button
+            } else {
+                addDebugMessage('Product not found for SKU: ' + sku);
+                alert('Product not found! Please check the SKU and try again.');
+                productDetails.classList.add('hidden');
+                scanSection.classList.add('hidden');
+            }
+        }
+
+        // Manual scanner control
+        startScanningBtn.addEventListener('click', function() {
+            if (!isScanning) {
+                initBarcodeScanner();
+            }
+        });
+        
+        stopScanningBtn.addEventListener('click', function() {
+            if (isScanning && html5QrCode) {
+                html5QrCode.stop().then(() => {
+                    isScanning = false;
+                    addDebugMessage('Scanner stopped manually');
+                }).catch(err => {
+                    addDebugMessage('Error stopping scanner: ' + err);
+                });
+            }
+        });
+
+        // Initialize barcode scanner
+        function initBarcodeScanner() {
+            addDebugMessage('Initializing barcode scanner...');
+            
+            if (html5QrCode && isScanning) {
+                html5QrCode.stop().then(() => {
+                    startNewScanner();
+                }).catch(err => {
+                    addDebugMessage('Error stopping scanner: ' + err);
+                    startNewScanner();
+                });
+            } else {
+                startNewScanner();
+            }
+        }
+        
+        function startNewScanner() {
+            addDebugMessage('Starting new scanner instance');
+            
+            if (!html5QrCode) {
+                html5QrCode = new Html5Qrcode("reader");
+            }
+            
+            const config = { 
+                fps: 10, 
+                qrbox: { width: 250, height: 150 },
+                aspectRatio: 1.777778
+            };
+
+            html5QrCode.start(
+                { facingMode: "environment" }, 
+                config, 
+                (decodedText) => {
+                    // On successful scan
+                    isScanning = false;
+                    barcodeResult.value = decodedText;
+                    
+                    addDebugMessage('Barcode scanned: ' + decodedText);
+                    
+                    // Play a beep sound to indicate successful scan
+                    const beep = new Audio("data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU" + Array(1e3).join("123"));
+                    beep.play().catch(e => console.log("Audio play failed:", e));
+                    
+                    html5QrCode.stop();
+                    
+                    // Auto-focus save button
+                    saveBarcodeBtn.focus();
+                },
+                (errorMessage) => {
+                    // Handle error (but don't display them, they happen constantly during scanning)
+                    // console.log(errorMessage);
+                }
+            ).then(() => {
+                isScanning = true;
+                addDebugMessage('Scanner started successfully');
+            }).catch((err) => {
+                isScanning = false;
+                addDebugMessage('Error starting scanner: ' + err);
+                alert("Could not start scanner: " + err);
+            });
+        }
+
+        // Save barcode to product data
+        saveBarcodeBtn.addEventListener('click', () => {
+            const barcode = barcodeResult.value.trim();
+            
+            if (currentProduct) {
+                addDebugMessage('Saving barcode: ' + barcode + ' for SKU: ' + currentProduct[skuColumn]);
+                
+                // Update the product data with the new barcode
+                currentProduct[barcodeColumn] = barcode;
+                
+                // Update statistics
+                updateStatistics();
+                
+                alert(barcode ? 'Barcode saved successfully!' : 'Barcode cleared!');
+                
+                // Reset for next scan
+                skuSearchInput.value = '';
+                barcodeResult.value = '';
+                productDetails.classList.add('hidden');
+                scanSection.classList.add('hidden');
+                
+                // Focus back on SKU search for next product
+                skuSearchInput.focus();
+            } else {
+                addDebugMessage('Error: No current product selected');
+                alert('Error: No product selected. Please search for a product first.');
+            }
+        });
+
+        // Download updated CSV
+        downloadCsvBtn.addEventListener('click', () => {
+            addDebugMessage('Preparing CSV for download...');
+            
+            // Generate filename with date
+            const today = new Date();
+            const dateStr = today.toISOString().slice(0, 10);
+            const filename = originalFileName.replace('.csv', '') + '_updated_' + dateStr + '.csv';
+            
+            try {
+                const csv = Papa.unparse(productData);
+                addDebugMessage('CSV generated successfully, size: ' + csv.length + ' bytes');
+                
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                
+                const link = document.createElement('a');
+                link.setAttribute('href', url);
+                link.setAttribute('download', filename);
+                link.style.visibility = 'hidden';
+                
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                addDebugMessage('Download initiated: ' + filename);
+            } catch (error) {
+                addDebugMessage('Error generating CSV: ' + error.message);
+                alert('Error generating CSV: ' + error.message);
+            }
+        });
+    </script>
+</body>
+</html>
